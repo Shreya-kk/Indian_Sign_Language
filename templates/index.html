@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ISL Detection (Render Compatible)</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background-color: #f7f9fc;
+            padding-top: 20px;
+        }
+        video, canvas {
+            display: block;
+            margin: 20px auto;
+            border-radius: 10px;
+        }
+        button {
+            font-size: 18px;
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        h2 {
+            color: #333;
+        }
+        #prediction {
+            font-size: 22px;
+            color: #0066cc;
+            margin-top: 20px;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+    </style>
+    <!-- Import MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+    <h2>Indian Sign Language Detection (Render Compatible)</h2>
+    <div class="container">
+        <div>
+            <video id="video" width="640" height="480" autoplay></video>
+            <div>Live Camera</div>
+        </div>
+        <div>
+            <canvas id="output" width="640" height="480"></canvas>
+            <div>Hand Landmarks</div>
+        </div>
+    </div>
+    <div id="prediction">Prediction: None</div>
+    <button onclick="startDetection()">Start Detection</button>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('output');
+        const ctx = canvas.getContext('2d');
+        const predictionElement = document.getElementById('prediction');
+
+        // For sending to Flask backend
+        const backendCanvas = document.createElement('canvas');
+        backendCanvas.width = 640;
+        backendCanvas.height = 480;
+        const backendCtx = backendCanvas.getContext('2d');
+
+        // Initialize MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults((results) => {
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+            
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+                        color: '#00FF00',
+                        lineWidth: 2
+                    });
+                    drawLandmarks(ctx, landmarks, {
+                        color: '#FF0000',
+                        lineWidth: 1,
+                        radius: 3
+                    });
+                }
+            }
+            ctx.restore();
+        });
+
+        // Get webcam stream
+        const camera = new Camera(video, {
+            onFrame: async () => {
+                await hands.send({image: video});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+
+        function startDetection() {
+            setInterval(() => {
+                // Draw current frame to backend canvas
+                backendCtx.drawImage(video, 0, 0, backendCanvas.width, backendCanvas.height);
+                const imageData = backendCanvas.toDataURL('image/jpeg');
+
+                fetch('/predict_frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageData })
+                })
+                .then(res => res.text())
+                .then(prediction => {
+                    predictionElement.innerText = "Prediction: " + prediction;
+                });
+            }, 1000); // 1 frame per second
+        }
+    </script>
+</body>
+</html>
